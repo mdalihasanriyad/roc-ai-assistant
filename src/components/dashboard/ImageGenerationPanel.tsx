@@ -6,9 +6,9 @@ import {
   RefreshCw,
   Sparkles,
   ImageIcon,
+  AlertCircle,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import {
@@ -18,6 +18,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { useImageGeneration } from "@/hooks/useImageGeneration";
 
 const roomTypes = [
   "Living Room",
@@ -55,25 +56,44 @@ export const ImageGenerationPanel = () => {
   const [style, setStyle] = useState("");
   const [colorPalette, setColorPalette] = useState("");
   const [instructions, setInstructions] = useState("");
-  const [isGenerating, setIsGenerating] = useState(false);
-  const [generatedImages, setGeneratedImages] = useState<string[]>([]);
+
+  const { isGenerating, generatedImages, description, generateImages, clearImages } = useImageGeneration();
 
   const handleGenerate = () => {
-    if (!roomType || !style) return;
+    generateImages({
+      roomType,
+      style,
+      colorPalette: colorPalette || undefined,
+      instructions: instructions || undefined,
+    });
+  };
 
-    setIsGenerating(true);
-
-    // Simulate image generation
-    setTimeout(() => {
-      // Using placeholder images for demo
-      setGeneratedImages([
-        `https://images.unsplash.com/photo-1618221195710-dd6b41faaea6?w=600&h=400&fit=crop`,
-        `https://images.unsplash.com/photo-1616486338812-3dadae4b4ace?w=600&h=400&fit=crop`,
-        `https://images.unsplash.com/photo-1600210492486-724fe5c67fb0?w=600&h=400&fit=crop`,
-        `https://images.unsplash.com/photo-1616137466211-f939a420be84?w=600&h=400&fit=crop`,
-      ]);
-      setIsGenerating(false);
-    }, 3000);
+  const handleDownload = async (imageUrl: string, index: number) => {
+    try {
+      // For base64 images
+      if (imageUrl.startsWith("data:")) {
+        const link = document.createElement("a");
+        link.href = imageUrl;
+        link.download = `roc-ai-design-${index + 1}.png`;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+      } else {
+        // For regular URLs
+        const response = await fetch(imageUrl);
+        const blob = await response.blob();
+        const url = window.URL.createObjectURL(blob);
+        const link = document.createElement("a");
+        link.href = url;
+        link.download = `roc-ai-design-${index + 1}.png`;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        window.URL.revokeObjectURL(url);
+      }
+    } catch (error) {
+      console.error("Download failed:", error);
+    }
   };
 
   return (
@@ -163,7 +183,7 @@ export const ImageGenerationPanel = () => {
               ) : (
                 <>
                   <Sparkles className="h-4 w-4" />
-                  Generate Designs
+                  Generate Design
                 </>
               )}
             </Button>
@@ -177,28 +197,49 @@ export const ImageGenerationPanel = () => {
 
       {/* Right Panel - Results */}
       <div className="flex-1 overflow-y-auto p-6">
-        {generatedImages.length === 0 ? (
+        {isGenerating ? (
+          <div className="flex h-full flex-col items-center justify-center text-center">
+            <div className="mb-6 flex h-20 w-20 items-center justify-center rounded-2xl bg-primary/10">
+              <RefreshCw className="h-10 w-10 text-primary animate-spin" />
+            </div>
+            <h3 className="mb-2 text-xl font-semibold">Generating Your Design</h3>
+            <p className="max-w-sm text-muted-foreground">
+              AI is creating a stunning {style} {roomType} visualization...
+            </p>
+          </div>
+        ) : generatedImages.length === 0 ? (
           <div className="flex h-full flex-col items-center justify-center text-center">
             <div className="mb-6 flex h-20 w-20 items-center justify-center rounded-2xl bg-primary/10">
               <ImageIcon className="h-10 w-10 text-primary" />
             </div>
             <h3 className="mb-2 text-xl font-semibold">No Images Yet</h3>
             <p className="max-w-sm text-muted-foreground">
-              Fill in the options on the left and click "Generate Designs" to
+              Fill in the options on the left and click "Generate Design" to
               create stunning interior visualizations.
             </p>
           </div>
         ) : (
           <div className="space-y-6">
             <div className="flex items-center justify-between">
-              <h3 className="text-lg font-semibold">Generated Designs</h3>
-              <Button variant="outline" size="sm" onClick={handleGenerate}>
-                <RefreshCw className="mr-2 h-4 w-4" />
-                Regenerate
-              </Button>
+              <h3 className="text-lg font-semibold">Generated Design</h3>
+              <div className="flex gap-2">
+                <Button variant="outline" size="sm" onClick={clearImages}>
+                  Clear
+                </Button>
+                <Button variant="outline" size="sm" onClick={handleGenerate} disabled={isGenerating}>
+                  <RefreshCw className="mr-2 h-4 w-4" />
+                  Regenerate
+                </Button>
+              </div>
             </div>
 
-            <div className="grid gap-4 sm:grid-cols-2">
+            {description && (
+              <div className="glass-card p-4 rounded-lg">
+                <p className="text-sm text-muted-foreground">{description}</p>
+              </div>
+            )}
+
+            <div className="grid gap-4 sm:grid-cols-1 lg:grid-cols-2">
               {generatedImages.map((image, index) => (
                 <motion.div
                   key={index}
@@ -209,18 +250,18 @@ export const ImageGenerationPanel = () => {
                 >
                   <img
                     src={image}
-                    alt={`Generated design ${index + 1}`}
+                    alt={`Generated ${style} ${roomType} design ${index + 1}`}
                     className="aspect-[4/3] w-full object-cover transition-transform group-hover:scale-105"
                   />
                   <div className="absolute inset-0 flex items-end justify-end gap-2 bg-gradient-to-t from-black/60 to-transparent p-4 opacity-0 transition-opacity group-hover:opacity-100">
-                    <Button size="sm" variant="secondary">
+                    <Button size="sm" variant="secondary" onClick={() => handleDownload(image, index)}>
                       <Download className="mr-2 h-4 w-4" />
                       Download
                     </Button>
                   </div>
                   <div className="absolute left-3 top-3">
                     <span className="rounded-full bg-background/80 px-2 py-1 text-xs font-medium backdrop-blur-sm">
-                      Variation {index + 1}
+                      {style} {roomType}
                     </span>
                   </div>
                 </motion.div>
