@@ -1,8 +1,9 @@
-import { useState } from "react";
+import { useState, useCallback } from "react";
 import { DashboardLayout } from "@/components/dashboard/DashboardLayout";
 import { ChatSidebar } from "@/components/dashboard/ChatSidebar";
 import { ChatInterface } from "@/components/dashboard/ChatInterface";
 import { ImageGenerationPanel } from "@/components/dashboard/ImageGenerationPanel";
+import { useAIChat, ChatMessage } from "@/hooks/useAIChat";
 
 export interface Message {
   id: string;
@@ -23,13 +24,15 @@ const Dashboard = () => {
   const [chats, setChats] = useState<Chat[]>([
     {
       id: "1",
-      title: "Living Room Design",
+      title: "New Chat",
       messages: [],
       createdAt: new Date(),
     },
   ]);
   const [activeChatId, setActiveChatId] = useState("1");
   const [sidebarOpen, setSidebarOpen] = useState(true);
+
+  const { streamChat, isLoading } = useAIChat();
 
   const activeChat = chats.find((c) => c.id === activeChatId);
 
@@ -44,57 +47,116 @@ const Dashboard = () => {
     setActiveChatId(newChat.id);
   };
 
-  const handleSendMessage = (content: string) => {
-    if (!activeChat) return;
+  const handleSendMessage = useCallback(
+    (content: string) => {
+      if (!activeChat || isLoading) return;
 
-    const userMessage: Message = {
-      id: Date.now().toString(),
-      role: "user",
-      content,
-      timestamp: new Date(),
-    };
-
-    // Add user message
-    setChats((prev) =>
-      prev.map((chat) =>
-        chat.id === activeChatId
-          ? {
-              ...chat,
-              messages: [...chat.messages, userMessage],
-              title:
-                chat.messages.length === 0
-                  ? content.slice(0, 30) + "..."
-                  : chat.title,
-            }
-          : chat
-      )
-    );
-
-    // Simulate AI response
-    setTimeout(() => {
-      const aiMessage: Message = {
-        id: (Date.now() + 1).toString(),
-        role: "assistant",
-        content: `I'd be happy to help you with "${content}". As your AI design assistant, I can provide suggestions for:
-
-• **Interior layouts** and furniture placement
-• **Color schemes** that complement your space
-• **Style recommendations** based on your preferences
-• **Space optimization** tips
-
-What specific aspect would you like me to focus on? I can also generate visual concepts using the Image Generation tab.`,
+      const userMessage: Message = {
+        id: Date.now().toString(),
+        role: "user",
+        content,
         timestamp: new Date(),
       };
 
+      // Add user message and update title if first message
       setChats((prev) =>
         prev.map((chat) =>
           chat.id === activeChatId
-            ? { ...chat, messages: [...chat.messages, aiMessage] }
+            ? {
+                ...chat,
+                messages: [...chat.messages, userMessage],
+                title:
+                  chat.messages.length === 0
+                    ? content.slice(0, 30) + (content.length > 30 ? "..." : "")
+                    : chat.title,
+              }
             : chat
         )
       );
-    }, 1500);
-  };
+
+      // Prepare messages for API (convert to ChatMessage format)
+      const apiMessages: ChatMessage[] = [
+        ...(activeChat.messages.map((m) => ({
+          role: m.role,
+          content: m.content,
+        })) as ChatMessage[]),
+        { role: "user" as const, content },
+      ];
+
+      let assistantContent = "";
+      const assistantId = (Date.now() + 1).toString();
+
+      streamChat({
+        messages: apiMessages,
+        onDelta: (chunk) => {
+          assistantContent += chunk;
+
+          setChats((prev) =>
+            prev.map((chat) => {
+              if (chat.id !== activeChatId) return chat;
+
+              const existingAssistantIndex = chat.messages.findIndex(
+                (m) => m.id === assistantId
+              );
+
+              if (existingAssistantIndex >= 0) {
+                // Update existing assistant message
+                const newMessages = [...chat.messages];
+                newMessages[existingAssistantIndex] = {
+                  ...newMessages[existingAssistantIndex],
+                  content: assistantContent,
+                };
+                return { ...chat, messages: newMessages };
+              } else {
+                // Create new assistant message
+                return {
+                  ...chat,
+                  messages: [
+                    ...chat.messages,
+                    {
+                      id: assistantId,
+                      role: "assistant" as const,
+                      content: assistantContent,
+                      timestamp: new Date(),
+                    },
+                  ],
+                };
+              }
+            })
+          );
+        },
+        onDone: () => {
+          // Streaming complete
+        },
+        onError: (error) => {
+          console.error("AI Error:", error);
+          // Add error message
+          setChats((prev) =>
+            prev.map((chat) => {
+              if (chat.id !== activeChatId) return chat;
+              
+              const hasAssistantMsg = chat.messages.some(m => m.id === assistantId);
+              if (hasAssistantMsg) return chat;
+              
+              return {
+                ...chat,
+                messages: [
+                  ...chat.messages,
+                  {
+                    id: assistantId,
+                    role: "assistant" as const,
+                    content: "I apologize, but I encountered an error. Please try again.",
+                    timestamp: new Date(),
+                  },
+                ],
+              };
+            })
+          );
+        },
+      });
+    },
+    [activeChat, activeChatId, streamChat, isLoading]
+  );
 
   const handleDeleteChat = (chatId: string) => {
     setChats((prev) => prev.filter((c) => c.id !== chatId));
@@ -128,6 +190,7 @@ What specific aspect would you like me to focus on? I can also generate visual c
             <ChatInterface
               messages={activeChat?.messages || []}
               onSendMessage={handleSendMessage}
+              isStreaming={isLoading}
             />
           ) : (
             <ImageGenerationPanel />

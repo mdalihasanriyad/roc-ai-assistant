@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Send, Copy, Check, Bot, User } from "lucide-react";
+import { Send, Copy, Check, Bot, User, Loader2 } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -9,15 +9,16 @@ import type { Message } from "@/pages/Dashboard";
 interface ChatInterfaceProps {
   messages: Message[];
   onSendMessage: (content: string) => void;
+  isStreaming?: boolean;
 }
 
 export const ChatInterface = ({
   messages,
   onSendMessage,
+  isStreaming = false,
 }: ChatInterfaceProps) => {
   const [input, setInput] = useState("");
   const [copiedId, setCopiedId] = useState<string | null>(null);
-  const [isTyping, setIsTyping] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -26,21 +27,9 @@ export const ChatInterface = ({
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
-  // Simulate typing indicator
-  useEffect(() => {
-    if (
-      messages.length > 0 &&
-      messages[messages.length - 1].role === "user"
-    ) {
-      setIsTyping(true);
-      const timer = setTimeout(() => setIsTyping(false), 1500);
-      return () => clearTimeout(timer);
-    }
-  }, [messages]);
-
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!input.trim()) return;
+    if (!input.trim() || isStreaming) return;
     onSendMessage(input.trim());
     setInput("");
   };
@@ -82,7 +71,8 @@ export const ChatInterface = ({
                 <button
                   key={suggestion}
                   onClick={() => onSendMessage(suggestion)}
-                  className="glass-card-hover px-4 py-3 text-left text-sm transition-all"
+                  disabled={isStreaming}
+                  className="glass-card-hover px-4 py-3 text-left text-sm transition-all disabled:opacity-50"
                 >
                   {suggestion}
                 </button>
@@ -125,18 +115,20 @@ export const ChatInterface = ({
                     )}
 
                     {/* Copy button */}
-                    <button
-                      onClick={() =>
-                        copyToClipboard(message.content, message.id)
-                      }
-                      className="absolute -right-2 -top-2 opacity-0 group-hover:opacity-100 transition-opacity p-1.5 rounded-md bg-secondary hover:bg-secondary/80"
-                    >
-                      {copiedId === message.id ? (
-                        <Check className="h-3 w-3 text-primary" />
-                      ) : (
-                        <Copy className="h-3 w-3" />
-                      )}
-                    </button>
+                    {message.content && (
+                      <button
+                        onClick={() =>
+                          copyToClipboard(message.content, message.id)
+                        }
+                        className="absolute -right-2 -top-2 opacity-0 group-hover:opacity-100 transition-opacity p-1.5 rounded-md bg-secondary hover:bg-secondary/80"
+                      >
+                        {copiedId === message.id ? (
+                          <Check className="h-3 w-3 text-primary" />
+                        ) : (
+                          <Copy className="h-3 w-3" />
+                        )}
+                      </button>
+                    )}
                   </div>
 
                   {message.role === "user" && (
@@ -148,8 +140,8 @@ export const ChatInterface = ({
               ))}
             </AnimatePresence>
 
-            {/* Typing Indicator */}
-            {isTyping && (
+            {/* Streaming Indicator */}
+            {isStreaming && messages[messages.length - 1]?.role === "user" && (
               <motion.div
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
@@ -188,19 +180,24 @@ export const ChatInterface = ({
               placeholder="Ask about design, architecture, layouts..."
               className="min-h-[52px] max-h-32 resize-none pr-12 input-glow"
               rows={1}
+              disabled={isStreaming}
             />
           </div>
           <Button
             type="submit"
             size="icon"
             className="h-[52px] w-[52px] shrink-0 btn-glow"
-            disabled={!input.trim()}
+            disabled={!input.trim() || isStreaming}
           >
-            <Send className="h-5 w-5" />
+            {isStreaming ? (
+              <Loader2 className="h-5 w-5 animate-spin" />
+            ) : (
+              <Send className="h-5 w-5" />
+            )}
           </Button>
         </form>
         <p className="mt-2 text-center text-xs text-muted-foreground">
-          Roc AI can make mistakes. Consider checking important information.
+          Powered by Lovable AI • Responses may not be perfect
         </p>
       </div>
     </div>
