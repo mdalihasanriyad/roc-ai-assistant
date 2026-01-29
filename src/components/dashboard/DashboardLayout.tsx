@@ -11,12 +11,13 @@ import {
   PanelLeft,
 } from "lucide-react";
 import { Logo } from "@/components/ui/Logo";
-import { Button } from "@/components/ui/button";
 import {
   Tooltip,
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import { useAuth } from "@/hooks/useAuth";
+import { useToast } from "@/hooks/use-toast";
 
 interface DashboardLayoutProps {
   children: ReactNode;
@@ -34,8 +35,23 @@ export const DashboardLayout = ({
   onSidebarToggle,
 }: DashboardLayoutProps) => {
   const navigate = useNavigate();
+  const { signOut } = useAuth();
+  const { toast } = useToast();
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
+    const { error } = await signOut();
+    if (error) {
+      toast({
+        title: "Sign out failed",
+        description: error.message,
+        variant: "destructive",
+      });
+      return;
+    }
+    toast({
+      title: "Signed out",
+      description: "You have been signed out successfully.",
+    });
     navigate("/");
   };
 
