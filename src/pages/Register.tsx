@@ -1,12 +1,13 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
-import { Eye, EyeOff, Mail, Lock, User } from "lucide-react";
+import { Eye, EyeOff, Mail, Lock, User, Loader2 } from "lucide-react";
 import { Logo } from "@/components/ui/Logo";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
+import { useAuth } from "@/hooks/useAuth";
 
 const Register = () => {
   const [name, setName] = useState("");
@@ -14,23 +15,58 @@ const Register = () => {
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
+  const [fieldErrors, setFieldErrors] = useState<{ name?: string; email?: string; password?: string }>({});
   const navigate = useNavigate();
   const { toast } = useToast();
+  const { signUp, isAuthenticated, loading: authLoading } = useAuth();
+
+  // Redirect if already authenticated
+  useEffect(() => {
+    if (!authLoading && isAuthenticated) {
+      navigate("/dashboard", { replace: true });
+    }
+  }, [isAuthenticated, authLoading, navigate]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsLoading(true);
+    setFieldErrors({});
 
-    // Simulate registration - in production, this would connect to your auth backend
-    setTimeout(() => {
+    const { error } = await signUp(email, password, name);
+
+    if (error) {
       setIsLoading(false);
-      toast({
-        title: "Account created!",
-        description: "Welcome to Roc AI. Let's start creating.",
-      });
-      navigate("/dashboard");
-    }, 1000);
+      
+      if (error.field === 'email') {
+        setFieldErrors({ email: error.message });
+      } else if (error.field === 'password') {
+        setFieldErrors({ password: error.message });
+      } else if (error.field === 'displayName') {
+        setFieldErrors({ name: error.message });
+      } else {
+        toast({
+          title: "Sign up failed",
+          description: error.message,
+          variant: "destructive",
+        });
+      }
+      return;
+    }
+
+    toast({
+      title: "Account created!",
+      description: "Welcome to Roc AI. Let's start creating.",
+    });
+    navigate("/dashboard");
   };
+
+  if (authLoading) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-background">
+        <Loader2 className="h-8 w-8 animate-spin text-primary" />
+      </div>
+    );
+  }
 
   return (
     <div className="flex min-h-screen">
@@ -112,11 +148,17 @@ const Register = () => {
                   type="text"
                   placeholder="John Doe"
                   value={name}
-                  onChange={(e) => setName(e.target.value)}
-                  className="pl-10 input-glow"
-                  required
+                  onChange={(e) => {
+                    setName(e.target.value);
+                    setFieldErrors(prev => ({ ...prev, name: undefined }));
+                  }}
+                  className={`pl-10 input-glow ${fieldErrors.name ? 'border-destructive' : ''}`}
+                  disabled={isLoading}
                 />
               </div>
+              {fieldErrors.name && (
+                <p className="text-sm text-destructive">{fieldErrors.name}</p>
+              )}
             </div>
 
             <div className="space-y-2">
@@ -128,11 +170,18 @@ const Register = () => {
                   type="email"
                   placeholder="you@example.com"
                   value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  className="pl-10 input-glow"
+                  onChange={(e) => {
+                    setEmail(e.target.value);
+                    setFieldErrors(prev => ({ ...prev, email: undefined }));
+                  }}
+                  className={`pl-10 input-glow ${fieldErrors.email ? 'border-destructive' : ''}`}
                   required
+                  disabled={isLoading}
                 />
               </div>
+              {fieldErrors.email && (
+                <p className="text-sm text-destructive">{fieldErrors.email}</p>
+              )}
             </div>
 
             <div className="space-y-2">
@@ -144,15 +193,20 @@ const Register = () => {
                   type={showPassword ? "text" : "password"}
                   placeholder="••••••••"
                   value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  className="pl-10 pr-10 input-glow"
+                  onChange={(e) => {
+                    setPassword(e.target.value);
+                    setFieldErrors(prev => ({ ...prev, password: undefined }));
+                  }}
+                  className={`pl-10 pr-10 input-glow ${fieldErrors.password ? 'border-destructive' : ''}`}
                   required
                   minLength={8}
+                  disabled={isLoading}
                 />
                 <button
                   type="button"
                   onClick={() => setShowPassword(!showPassword)}
                   className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                  disabled={isLoading}
                 >
                   {showPassword ? (
                     <EyeOff className="h-5 w-5" />
@@ -161,6 +215,9 @@ const Register = () => {
                   )}
                 </button>
               </div>
+              {fieldErrors.password && (
+                <p className="text-sm text-destructive">{fieldErrors.password}</p>
+              )}
               <p className="text-xs text-muted-foreground">
                 Must be at least 8 characters
               </p>
@@ -171,7 +228,14 @@ const Register = () => {
               className="w-full btn-glow"
               disabled={isLoading}
             >
-              {isLoading ? "Creating account..." : "Create Account"}
+              {isLoading ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Creating account...
+                </>
+              ) : (
+                "Create Account"
+              )}
             </Button>
           </form>
 
