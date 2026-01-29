@@ -1,9 +1,11 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { DashboardLayout } from "@/components/dashboard/DashboardLayout";
 import { ChatSidebar } from "@/components/dashboard/ChatSidebar";
 import { ChatInterface } from "@/components/dashboard/ChatInterface";
 import { ImageGenerationPanel } from "@/components/dashboard/ImageGenerationPanel";
 import { useAIChat, ChatMessage } from "@/hooks/useAIChat";
+import { useChatSessions } from "@/hooks/useChatSessions";
+import { Loader2 } from "lucide-react";
 
 export interface Message {
   id: string;
@@ -21,149 +23,127 @@ export interface Chat {
 
 const Dashboard = () => {
   const [activeTab, setActiveTab] = useState<"chat" | "image">("chat");
-  const [chats, setChats] = useState<Chat[]>([
-    {
-      id: "1",
-      title: "New Chat",
-      messages: [],
-      createdAt: new Date(),
-    },
-  ]);
-  const [activeChatId, setActiveChatId] = useState("1");
   const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [streamingMessageId, setStreamingMessageId] = useState<string | null>(null);
+  const [streamingContent, setStreamingContent] = useState("");
 
-  const { streamChat, isLoading } = useAIChat();
+  const {
+    sessions,
+    activeSession,
+    activeSessionId,
+    isLoading: sessionsLoading,
+    setActiveSessionId,
+    createSession,
+    updateSessionTitle,
+    deleteSession,
+    addMessage,
+    updateMessageContent,
+  } = useChatSessions();
 
-  const activeChat = chats.find((c) => c.id === activeChatId);
+  const { streamChat, isLoading: chatLoading } = useAIChat();
 
-  const handleNewChat = () => {
-    const newChat: Chat = {
-      id: Date.now().toString(),
-      title: "New Chat",
-      messages: [],
-      createdAt: new Date(),
-    };
-    setChats([newChat, ...chats]);
-    setActiveChatId(newChat.id);
+  // Convert sessions to Chat format for sidebar
+  const chats: Chat[] = sessions.map((s) => ({
+    id: s.id,
+    title: s.title,
+    messages: s.messages.map((m) => ({
+      id: m.id,
+      role: m.role,
+      content: m.id === streamingMessageId ? streamingContent : m.content,
+      timestamp: new Date(m.created_at),
+    })),
+    createdAt: new Date(s.created_at),
+  }));
+
+  const activeChat = chats.find((c) => c.id === activeSessionId);
+
+  // Auto-create first chat session if none exist
+  useEffect(() => {
+    if (!sessionsLoading && sessions.length === 0) {
+      createSession("New Chat");
+    }
+  }, [sessionsLoading, sessions.length, createSession]);
+
+  const handleNewChat = async () => {
+    await createSession("New Chat");
   };
 
   const handleSendMessage = useCallback(
-    (content: string) => {
-      if (!activeChat || isLoading) return;
+    async (content: string) => {
+      if (!activeSession || chatLoading) return;
 
-      const userMessage: Message = {
-        id: Date.now().toString(),
-        role: "user",
-        content,
-        timestamp: new Date(),
-      };
+      // Create session if we don't have one
+      let sessionId = activeSession.id;
 
-      // Add user message and update title if first message
-      setChats((prev) =>
-        prev.map((chat) =>
-          chat.id === activeChatId
-            ? {
-                ...chat,
-                messages: [...chat.messages, userMessage],
-                title:
-                  chat.messages.length === 0
-                    ? content.slice(0, 30) + (content.length > 30 ? "..." : "")
-                    : chat.title,
-              }
-            : chat
-        )
-      );
+      // Add user message to database
+      const userMsgId = await addMessage(sessionId, "user", content);
+      if (!userMsgId) return;
 
-      // Prepare messages for API (convert to ChatMessage format)
+      // Update title if first message
+      if (activeSession.messages.length === 0) {
+        const title = content.slice(0, 30) + (content.length > 30 ? "..." : "");
+        await updateSessionTitle(sessionId, title);
+      }
+
+      // Prepare messages for API
       const apiMessages: ChatMessage[] = [
-        ...(activeChat.messages.map((m) => ({
+        ...activeSession.messages.map((m) => ({
           role: m.role,
           content: m.content,
-        })) as ChatMessage[]),
+        })),
         { role: "user" as const, content },
       ];
 
-      let assistantContent = "";
-      const assistantId = (Date.now() + 1).toString();
+      // Create placeholder for assistant message
+      const assistantMsgId = await addMessage(sessionId, "assistant", "");
+      if (!assistantMsgId) return;
+
+      setStreamingMessageId(assistantMsgId);
+      setStreamingContent("");
+
+      let fullContent = "";
 
       streamChat({
         messages: apiMessages,
         onDelta: (chunk) => {
-          assistantContent += chunk;
-
-          setChats((prev) =>
-            prev.map((chat) => {
-              if (chat.id !== activeChatId) return chat;
-
-              const existingAssistantIndex = chat.messages.findIndex(
-                (m) => m.id === assistantId
-              );
-
-              if (existingAssistantIndex >= 0) {
-                // Update existing assistant message
-                const newMessages = [...chat.messages];
-                newMessages[existingAssistantIndex] = {
-                  ...newMessages[existingAssistantIndex],
-                  content: assistantContent,
-                };
-                return { ...chat, messages: newMessages };
-              } else {
-                // Create new assistant message
-                return {
-                  ...chat,
-                  messages: [
-                    ...chat.messages,
-                    {
-                      id: assistantId,
-                      role: "assistant" as const,
-                      content: assistantContent,
-                      timestamp: new Date(),
-                    },
-                  ],
-                };
-              }
-            })
-          );
+          fullContent += chunk;
+          setStreamingContent(fullContent);
+          updateMessageContent(sessionId, assistantMsgId, fullContent);
         },
         onDone: () => {
-          // Streaming complete
+          setStreamingMessageId(null);
+          setStreamingContent("");
         },
         onError: (error) => {
           console.error("AI Error:", error);
-          // Add error message
-          setChats((prev) =>
-            prev.map((chat) => {
-              if (chat.id !== activeChatId) return chat;
-              
-              const hasAssistantMsg = chat.messages.some(m => m.id === assistantId);
-              if (hasAssistantMsg) return chat;
-              
-              return {
-                ...chat,
-                messages: [
-                  ...chat.messages,
-                  {
-                    id: assistantId,
-                    role: "assistant" as const,
-                    content: "I apologize, but I encountered an error. Please try again.",
-                    timestamp: new Date(),
-                  },
-                ],
-              };
-            })
-          );
+          const errorContent = "I apologize, but I encountered an error. Please try again.";
+          updateMessageContent(sessionId, assistantMsgId, errorContent);
+          setStreamingMessageId(null);
+          setStreamingContent("");
         },
       });
     },
-    [activeChat, activeChatId, streamChat, isLoading]
+    [activeSession, chatLoading, addMessage, updateSessionTitle, streamChat, updateMessageContent]
   );
 
-  const handleDeleteChat = (chatId: string) => {
-    setChats((prev) => prev.filter((c) => c.id !== chatId));
-    if (activeChatId === chatId && chats.length > 1) {
-      setActiveChatId(chats[0].id === chatId ? chats[1].id : chats[0].id);
-    }
+  const handleDeleteChat = async (chatId: string) => {
+    await deleteSession(chatId);
   };
+
+  if (sessionsLoading) {
+    return (
+      <DashboardLayout
+        activeTab={activeTab}
+        onTabChange={setActiveTab}
+        sidebarOpen={sidebarOpen}
+        onSidebarToggle={() => setSidebarOpen(!sidebarOpen)}
+      >
+        <div className="flex h-full items-center justify-center">
+          <Loader2 className="h-8 w-8 animate-spin text-primary" />
+        </div>
+      </DashboardLayout>
+    );
+  }
 
   return (
     <DashboardLayout
@@ -177,8 +157,8 @@ const Dashboard = () => {
         {sidebarOpen && activeTab === "chat" && (
           <ChatSidebar
             chats={chats}
-            activeChatId={activeChatId}
-            onSelectChat={setActiveChatId}
+            activeChatId={activeSessionId || ""}
+            onSelectChat={setActiveSessionId}
             onNewChat={handleNewChat}
             onDeleteChat={handleDeleteChat}
           />
@@ -190,7 +170,7 @@ const Dashboard = () => {
             <ChatInterface
               messages={activeChat?.messages || []}
               onSendMessage={handleSendMessage}
-              isStreaming={isLoading}
+              isStreaming={chatLoading}
             />
           ) : (
             <ImageGenerationPanel />
