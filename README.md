@@ -1,8 +1,7 @@
-# Welcome to your ai first project
+# Welcome to your Ai first project
 a
 ## Project info
 
-**URL**: https://lovable.dev/projects/REPLACE_WITH_PROJECT_ID
 
 ## How can I edit this code?
 
